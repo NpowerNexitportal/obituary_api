@@ -1,0 +1,1 @@
+"""Obituary content collector package."""
