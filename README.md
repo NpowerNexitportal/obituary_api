@@ -102,7 +102,13 @@ pip install -r requirements.txt
 uvicorn api.main:app --host 0.0.0.0 --port $PORT
 ```
 
-5. Add environment variables:
+5. Render reads `.python-version` and deploys with Python 3.11.15. If you prefer to set it in the dashboard instead, add:
+
+```text
+PYTHON_VERSION=3.11.15
+```
+
+6. Add environment variables:
 
 ```text
 MONGODB_URI=your Atlas connection string
@@ -110,7 +116,7 @@ MONGODB_DB=obituary_api
 CORS_ORIGINS=*
 ```
 
-6. Open `/health` on the deployed URL to confirm MongoDB connectivity.
+7. Open `/health` on the deployed URL to confirm MongoDB connectivity.
 
 ## GitHub Actions Automation
 
