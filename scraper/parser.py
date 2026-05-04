@@ -94,7 +94,7 @@ def _google_result_url(href: str) -> str | None:
 
 
 def _search_google(keyword: str, limit: int) -> list[SearchResult]:
-    query = f'{keyword} (obituary OR death) (site:.com.ng OR site:.site OR site:.today)'
+    query = f'"{keyword}" (obituary OR death OR "passed away") (site:.com.ng OR site:.site OR site:.today)'
     url = f"https://www.google.com/search?q={quote_plus(query)}&num={min(max(limit * 4, 10), 20)}&hl=en&gl=us"
     session = _session()
     response = session.get(url, timeout=12)
@@ -129,7 +129,7 @@ def _search_google(keyword: str, limit: int) -> list[SearchResult]:
 
 
 def _search_duckduckgo_fallback(keyword: str, limit: int) -> list[SearchResult]:
-    query = f"{keyword} obituary death site:.com.ng OR site:.site OR site:.today"
+    query = f'"{keyword}" obituary death passed away site:.com.ng OR site:.site OR site:.today'
     url = f"https://duckduckgo.com/html/?q={quote_plus(query)}&kl=us-en"
     session = _session()
     response = session.get(url, timeout=12)

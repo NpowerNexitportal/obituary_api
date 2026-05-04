@@ -92,5 +92,11 @@ def fetch_trending_keywords(max_keywords: int | None = None, exclude: Iterable[s
         if any(term in cleaned for term in ("obituary", "death", "passed away", "rip", "funeral")):
             filtered.append(cleaned)
 
+    if len(filtered) < max_keywords:
+        for keyword in DEFAULT_KEYWORDS:
+            cleaned = _clean_keyword(keyword)
+            if cleaned not in filtered:
+                filtered.append(cleaned)
+
     random.shuffle(filtered)
     return filtered[:max_keywords]
