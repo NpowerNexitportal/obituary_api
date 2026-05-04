@@ -1,4 +1,4 @@
-"""Fetch USA-focused obituary-related keywords without browser automation."""
+"""Fetch obituary/death trend keywords without browser automation."""
 
 from __future__ import annotations
 
@@ -12,10 +12,12 @@ import requests
 
 LOGGER = logging.getLogger(__name__)
 
-SEEDS = ("obituary", "passed away", "RIP")
+SEEDS = ("obituary", "death")
 DEFAULT_KEYWORDS = (
     "recent obituary",
     "who passed away today obituary",
+    "death news today",
+    "death notice today",
     "funeral obituary notices",
     "local obituary passed away",
     "celebrity obituary today",
@@ -58,7 +60,7 @@ def _pytrends_related(seed: str) -> list[str]:
 
 
 def fetch_trending_keywords(max_keywords: int | None = None, exclude: Iterable[str] = ()) -> list[str]:
-    """Return 5-10 respectful obituary-related keywords for the current run."""
+    """Return 5-10 obituary/death keywords from Google Trends-style sources."""
 
     max_keywords = max_keywords or int(os.getenv("MAX_KEYWORDS_PER_RUN", "8"))
     max_keywords = max(1, min(max_keywords, 10))
@@ -87,7 +89,7 @@ def fetch_trending_keywords(max_keywords: int | None = None, exclude: Iterable[s
         cleaned = _clean_keyword(keyword)
         if not cleaned or cleaned in excluded or cleaned in filtered:
             continue
-        if any(term in cleaned for term in ("obituary", "passed away", "rip", "funeral", "death notice")):
+        if any(term in cleaned for term in ("obituary", "death", "passed away", "rip", "funeral")):
             filtered.append(cleaned)
 
     random.shuffle(filtered)

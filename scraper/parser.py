@@ -1,4 +1,4 @@
-"""Search-result scraping and obituary field extraction."""
+"""Google-result scraping and obituary field extraction."""
 
 from __future__ import annotations
 
@@ -15,6 +15,13 @@ import requests
 from bs4 import BeautifulSoup
 
 LOGGER = logging.getLogger(__name__)
+
+ALLOWED_SOURCE_SUFFIXES = (".com.ng", ".site", ".today")
+GOOGLE_BLOCK_MARKERS = (
+    "Our systems have detected unusual traffic",
+    "detected unusual traffic",
+    "/sorry/index",
+)
 
 MONTHS = (
     "January",
@@ -54,30 +61,89 @@ def _session() -> requests.Session:
     session = requests.Session()
     session.headers.update(
         {
-            "User-Agent": "Mozilla/5.0 (compatible; ObituaryContentCollector/1.0; respectful scraping)",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            ),
             "Accept-Language": "en-US,en;q=0.9",
         }
     )
     return session
 
 
-def search_obituary_results(keyword: str, limit: int = 4) -> list[SearchResult]:
-    """Scrape lightweight DuckDuckGo HTML search results for source pages."""
+def _allowed_source_url(url: str) -> bool:
+    host = urlparse(url).netloc.lower().split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return any(host.endswith(suffix) for suffix in ALLOWED_SOURCE_SUFFIXES)
 
-    url = f"https://duckduckgo.com/html/?q={quote_plus(keyword + ' obituary')}&kl=us-en"
+
+def _google_result_url(href: str) -> str | None:
+    if href.startswith("/url?"):
+        query = parse_qs(urlparse(href).query)
+        href = query.get("q", [""])[0]
+    elif href.startswith("/search?") or href.startswith("#"):
+        return None
+
+    href = unquote(href)
+    if not href.startswith(("http://", "https://")):
+        return None
+    if "google." in urlparse(href).netloc.lower():
+        return None
+    return href
+
+
+def _search_google(keyword: str, limit: int) -> list[SearchResult]:
+    query = f'{keyword} (obituary OR death) (site:.com.ng OR site:.site OR site:.today)'
+    url = f"https://www.google.com/search?q={quote_plus(query)}&num={min(max(limit * 4, 10), 20)}&hl=en&gl=us"
+    session = _session()
+    response = session.get(url, timeout=12)
+    response.raise_for_status()
+
+    if any(marker in response.text for marker in GOOGLE_BLOCK_MARKERS):
+        raise RuntimeError("Google blocked the search request")
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    results: list[SearchResult] = []
+    seen: set[str] = set()
+
+    for container in soup.select("div.g, div.MjjYud, div.Gx5Zad"):
+        link = container.find("a", href=True)
+        if not link:
+            continue
+        href = _google_result_url(link["href"])
+        if not href or href in seen or not _allowed_source_url(href):
+            continue
+        title_tag = link.find("h3") or link
+        title = title_tag.get_text(" ", strip=True)
+        snippet_tag = container.select_one(".VwiC3b, .IsZvec, .BNeawe")
+        snippet = snippet_tag.get_text(" ", strip=True) if snippet_tag else ""
+        if not title:
+            continue
+        results.append(SearchResult(title=title, url=href, snippet=snippet))
+        seen.add(href)
+        if len(results) >= limit:
+            break
+
+    return results
+
+
+def _search_duckduckgo_fallback(keyword: str, limit: int) -> list[SearchResult]:
+    query = f"{keyword} obituary death site:.com.ng OR site:.site OR site:.today"
+    url = f"https://duckduckgo.com/html/?q={quote_plus(query)}&kl=us-en"
     session = _session()
     response = session.get(url, timeout=12)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
     results: list[SearchResult] = []
 
-    for result in soup.select(".result")[: limit * 2]:
+    for result in soup.select(".result")[: limit * 4]:
         link = result.select_one(".result__a")
         snippet = result.select_one(".result__snippet")
         if not link or not link.get("href"):
             continue
         href = _unwrap_duckduckgo_url(link["href"])
-        if not href.startswith(("http://", "https://")):
+        if not href.startswith(("http://", "https://")) or not _allowed_source_url(href):
             continue
         title = link.get_text(" ", strip=True)
         text = snippet.get_text(" ", strip=True) if snippet else ""
@@ -86,6 +152,25 @@ def search_obituary_results(keyword: str, limit: int = 4) -> list[SearchResult]:
             break
 
     return results
+
+
+def search_obituary_results(keyword: str, limit: int = 4) -> list[SearchResult]:
+    """Scrape Google Search first, filtered to .com.ng, .site, and .today pages."""
+
+    try:
+        results = _search_google(keyword, limit)
+    except Exception as exc:
+        LOGGER.warning("Google search failed for %s: %s", keyword, exc)
+        results = []
+
+    if results:
+        return results
+
+    try:
+        return _search_duckduckgo_fallback(keyword, limit)
+    except Exception as exc:
+        LOGGER.warning("Fallback search failed for %s: %s", keyword, exc)
+        return []
 
 
 def _unwrap_duckduckgo_url(href: str) -> str:
@@ -186,7 +271,10 @@ def fetch_and_extract(result: SearchResult) -> dict[str, str] | None:
     text = _visible_text(response.text)
     combined = f"{page_title}. {description}. {text}"
 
-    if not any(term in combined.lower() for term in ("obituary", "passed away", "funeral", "death notice")):
+    if not _allowed_source_url(result.url):
+        return None
+
+    if not any(term in combined.lower() for term in ("obituary", "passed away", "funeral", "death notice", "death")):
         return None
 
     name = _extract_name(page_title, combined)

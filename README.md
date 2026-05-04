@@ -4,7 +4,7 @@ Production-ready starter system for collecting respectful, USA-focused obituary 
 
 ## Architecture
 
-- `scraper/`: independent collector run by GitHub Actions. It fetches trend keywords, scrapes lightweight HTML pages with `requests` and BeautifulSoup, extracts structured fields, rewrites content respectfully, deduplicates by hash, and writes to MongoDB.
+- `scraper/`: independent collector run by GitHub Actions. It fetches Google Trends-style keywords for `obituary` and `death`, searches Google for obituary/death pages on `.com.ng`, `.site`, and `.today` domains, scrapes lightweight HTML pages with `requests` and BeautifulSoup, extracts structured fields, rewrites content respectfully, deduplicates by hash, and writes to MongoDB.
 - `api/`: FastAPI app that only reads MongoDB and returns clean JSON responses. No scraping runs inside the API.
 - `wordpress-plugin/`: WordPress plugin that fetches `/api/obituaries` and publishes new posts when called by a secure external trigger.
 - `.github/workflows/cron.yml`: runs the collector every 15 minutes.
@@ -180,6 +180,7 @@ curl -X POST \
 ## Content and Compliance Notes
 
 - The scraper uses public web pages and lightweight requests. Review source site terms before scaling traffic.
+- Search discovery targets obituary/death results on `.com.ng`, `.site`, and `.today` domains.
 - The rewrite step is instructed not to invent relatives, causes of death, service times, or private details.
 - Each post links back to the source URL in metadata and keeps a source id for deduplication.
 - Keep `MAX_KEYWORDS_PER_RUN` between 5 and 10 to avoid excessive scraping.
