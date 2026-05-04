@@ -80,10 +80,11 @@ final class Obituary_Auto_Poster {
             update_option(self::OPTION_TRIGGER_TOKEN, $token);
         }
         $trigger_url = rest_url(self::REST_NAMESPACE . self::REST_ROUTE);
+        $trigger_url_with_token = add_query_arg('token', rawurlencode($token), $trigger_url);
         ?>
         <div class="wrap">
             <h1>Obituary Auto Poster</h1>
-            <p>This plugin does not use WordPress cron. Call the secure trigger URL from GitHub Actions, Render cron, or any external scheduler.</p>
+            <p>This plugin does not use WordPress cron. Call the secure trigger URL from an external scheduler such as cron-job.org, Render cron, GitHub Actions, or cPanel cron.</p>
             <form method="post" action="options.php">
                 <?php settings_fields('oap_settings'); ?>
                 <table class="form-table" role="presentation">
@@ -132,6 +133,19 @@ final class Obituary_Auto_Poster {
                         <td>
                             <code><?php echo esc_html($trigger_url); ?></code>
                             <p class="description">Send a POST request with header <code>X-OAP-Token: your-token</code>.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Cron URL</th>
+                        <td>
+                            <input
+                                type="text"
+                                class="large-text code"
+                                readonly
+                                value="<?php echo esc_attr($trigger_url_with_token); ?>"
+                                onclick="this.select();"
+                            />
+                            <p class="description">Use this full URL with cron-job.org or cPanel cron if your scheduler can only open a URL.</p>
                         </td>
                     </tr>
                 </table>

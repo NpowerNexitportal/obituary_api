@@ -152,7 +152,15 @@ The plugin does not use WordPress cron. This is better for shared hosts such as 
 
 ## External WordPress Publishing Cron
 
-To trigger publishing from GitHub Actions, add these repository secrets:
+The plugin settings page shows a **Cron URL** that already includes the secure token:
+
+```text
+https://your-wordpress-site.com/wp-json/obituary-auto-poster/v1/run?token=YOUR_TOKEN
+```
+
+Use that URL with cron-job.org, EasyCron, cPanel cron, or another scheduler every 15 minutes.
+
+If you prefer GitHub Actions, add these repository secrets:
 
 ```text
 WORDPRESS_TRIGGER_URL=https://your-wordpress-site.com/wp-json/obituary-auto-poster/v1/run
