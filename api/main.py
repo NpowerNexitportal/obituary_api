@@ -26,7 +26,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "HEAD", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -44,7 +44,16 @@ async def runtime_error_handler(_: Request, exc: RuntimeError):
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
-@app.get("/health")
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root() -> dict[str, str]:
+    return {
+        "name": "Obituary Content API",
+        "status": "ok",
+        "message": "API is running. See /health for database status or /docs for documentation.",
+    }
+
+
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health() -> dict[str, str]:
     await get_client().admin.command("ping")
     return {"status": "ok"}

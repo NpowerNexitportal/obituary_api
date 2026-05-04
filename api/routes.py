@@ -21,7 +21,7 @@ def _page_params(page: int, limit: int) -> tuple[int, int, int]:
     return page, limit, skip
 
 
-@router.get("/obituaries", response_model=ObituaryList)
+@router.api_route("/obituaries", methods=["GET", "HEAD"], response_model=ObituaryList)
 async def latest_obituaries(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=50),
@@ -34,7 +34,7 @@ async def latest_obituaries(
     return ObituaryList(page=page, limit=limit, total=total, items=items)
 
 
-@router.get("/obituaries/{id_or_slug}", response_model=Obituary)
+@router.api_route("/obituaries/{id_or_slug}", methods=["GET", "HEAD"], response_model=Obituary)
 async def single_obituary(id_or_slug: str) -> Obituary:
     collection = obituaries_collection()
     query = {"slug": id_or_slug}
@@ -47,7 +47,7 @@ async def single_obituary(id_or_slug: str) -> Obituary:
     return Obituary.model_validate(serialize_document(document))
 
 
-@router.get("/search", response_model=ObituaryList)
+@router.api_route("/search", methods=["GET", "HEAD"], response_model=ObituaryList)
 async def search_obituaries(
     q: str = Query(..., min_length=2, max_length=80),
     page: int = Query(1, ge=1),
@@ -72,7 +72,7 @@ async def search_obituaries(
     return ObituaryList(page=page, limit=limit, total=total, items=items)
 
 
-@router.get("/trending", response_model=list[TrendingKeyword])
+@router.api_route("/trending", methods=["GET", "HEAD"], response_model=list[TrendingKeyword])
 async def trending_keywords(limit: int = Query(10, ge=1, le=50)) -> list[TrendingKeyword]:
     cursor = trends_collection().find({}).sort("last_seen_at", DESCENDING).limit(limit)
     return [TrendingKeyword.model_validate(doc) async for doc in cursor]
