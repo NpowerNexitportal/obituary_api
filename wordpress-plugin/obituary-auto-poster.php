@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Obituary Auto Poster
- * Description: Fetches obituary posts from a FastAPI endpoint and publishes them to WordPress on a schedule.
- * Version: 1.0.0
+ * Description: Fetches obituary posts from a FastAPI endpoint and publishes them when called by a secure external trigger.
+ * Version: 1.1.0
  * Author: Obituary Content API
  * License: GPL-2.0-or-later
  */
@@ -14,15 +14,17 @@ if (!defined('ABSPATH')) {
 final class Obituary_Auto_Poster {
     private const OPTION_API_URL = 'oap_api_url';
     private const OPTION_LIMIT = 'oap_fetch_limit';
+    private const OPTION_TRIGGER_TOKEN = 'oap_trigger_token';
     private const CRON_HOOK = 'oap_fetch_obituaries_event';
     private const META_SOURCE_ID = '_oap_source_id';
     private const META_SOURCE_URL = '_oap_source_url';
+    private const REST_NAMESPACE = 'obituary-auto-poster/v1';
+    private const REST_ROUTE = '/run';
 
     public static function init(): void {
         add_action('admin_menu', [__CLASS__, 'settings_menu']);
         add_action('admin_init', [__CLASS__, 'register_settings']);
-        add_action(self::CRON_HOOK, [__CLASS__, 'fetch_and_publish']);
-        add_filter('cron_schedules', [__CLASS__, 'cron_schedules']);
+        add_action('rest_api_init', [__CLASS__, 'register_rest_routes']);
         add_action('wp_head', [__CLASS__, 'print_meta_description']);
     }
 
@@ -30,24 +32,14 @@ final class Obituary_Auto_Poster {
         if (!get_option(self::OPTION_LIMIT)) {
             update_option(self::OPTION_LIMIT, 10);
         }
-        if (!wp_next_scheduled(self::CRON_HOOK)) {
-            wp_schedule_event(time() + 60, 'oap_fifteen_minutes', self::CRON_HOOK);
+        if (!get_option(self::OPTION_TRIGGER_TOKEN)) {
+            update_option(self::OPTION_TRIGGER_TOKEN, self::generate_token());
         }
+        self::clear_legacy_cron();
     }
 
     public static function deactivate(): void {
-        $timestamp = wp_next_scheduled(self::CRON_HOOK);
-        if ($timestamp) {
-            wp_unschedule_event($timestamp, self::CRON_HOOK);
-        }
-    }
-
-    public static function cron_schedules(array $schedules): array {
-        $schedules['oap_fifteen_minutes'] = [
-            'interval' => 15 * MINUTE_IN_SECONDS,
-            'display' => __('Every 15 Minutes', 'obituary-auto-poster'),
-        ];
-        return $schedules;
+        self::clear_legacy_cron();
     }
 
     public static function settings_menu(): void {
@@ -71,15 +63,27 @@ final class Obituary_Auto_Poster {
             'sanitize_callback' => 'absint',
             'default' => 10,
         ]);
+        register_setting('oap_settings', self::OPTION_TRIGGER_TOKEN, [
+            'type' => 'string',
+            'sanitize_callback' => [__CLASS__, 'sanitize_token'],
+            'default' => '',
+        ]);
     }
 
     public static function settings_page(): void {
         if (!current_user_can('manage_options')) {
             return;
         }
+        $token = get_option(self::OPTION_TRIGGER_TOKEN);
+        if (!$token) {
+            $token = self::generate_token();
+            update_option(self::OPTION_TRIGGER_TOKEN, $token);
+        }
+        $trigger_url = rest_url(self::REST_NAMESPACE . self::REST_ROUTE);
         ?>
         <div class="wrap">
             <h1>Obituary Auto Poster</h1>
+            <p>This plugin does not use WordPress cron. Call the secure trigger URL from GitHub Actions, Render cron, or any external scheduler.</p>
             <form method="post" action="options.php">
                 <?php settings_fields('oap_settings'); ?>
                 <table class="form-table" role="presentation">
@@ -109,6 +113,27 @@ final class Obituary_Auto_Poster {
                             />
                         </td>
                     </tr>
+                    <tr>
+                        <th scope="row"><label for="<?php echo esc_attr(self::OPTION_TRIGGER_TOKEN); ?>">Trigger token</label></th>
+                        <td>
+                            <input
+                                name="<?php echo esc_attr(self::OPTION_TRIGGER_TOKEN); ?>"
+                                id="<?php echo esc_attr(self::OPTION_TRIGGER_TOKEN); ?>"
+                                type="text"
+                                class="regular-text code"
+                                value="<?php echo esc_attr($token); ?>"
+                                autocomplete="off"
+                            />
+                            <p class="description">Keep this private. Change it to rotate access.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">External trigger URL</th>
+                        <td>
+                            <code><?php echo esc_html($trigger_url); ?></code>
+                            <p class="description">Send a POST request with header <code>X-OAP-Token: your-token</code>.</p>
+                        </td>
+                    </tr>
                 </table>
                 <?php submit_button(); ?>
             </form>
@@ -116,10 +141,36 @@ final class Obituary_Auto_Poster {
         <?php
     }
 
-    public static function fetch_and_publish(): void {
+    public static function register_rest_routes(): void {
+        register_rest_route(self::REST_NAMESPACE, self::REST_ROUTE, [
+            'methods' => ['GET', 'POST'],
+            'callback' => [__CLASS__, 'rest_run'],
+            'permission_callback' => '__return_true',
+        ]);
+    }
+
+    public static function rest_run(WP_REST_Request $request): WP_REST_Response {
+        $configured = (string) get_option(self::OPTION_TRIGGER_TOKEN);
+        $provided = (string) ($request->get_header('x-oap-token') ?: $request->get_param('token'));
+
+        if (!$configured || !$provided || !hash_equals($configured, $provided)) {
+            return new WP_REST_Response([
+                'success' => false,
+                'message' => 'Invalid trigger token.',
+            ], 403);
+        }
+
+        $result = self::fetch_and_publish();
+        return new WP_REST_Response([
+            'success' => true,
+            'result' => $result,
+        ], 200);
+    }
+
+    public static function fetch_and_publish(): array {
         $api_url = trim((string) get_option(self::OPTION_API_URL));
         if (!$api_url) {
-            return;
+            return ['fetched' => 0, 'published' => 0, 'skipped' => 0, 'error' => 'API URL is not configured.'];
         }
 
         $limit = min(max((int) get_option(self::OPTION_LIMIT, 10), 1), 50);
@@ -130,22 +181,32 @@ final class Obituary_Auto_Poster {
         ]);
 
         if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
-            return;
+            return ['fetched' => 0, 'published' => 0, 'skipped' => 0, 'error' => 'Could not fetch API data.'];
         }
 
         $payload = json_decode(wp_remote_retrieve_body($response), true);
         if (!is_array($payload) || empty($payload['items']) || !is_array($payload['items'])) {
-            return;
+            return ['fetched' => 0, 'published' => 0, 'skipped' => 0, 'error' => 'API returned no items.'];
         }
 
+        $published = 0;
+        $skipped = 0;
         foreach ($payload['items'] as $item) {
-            if (is_array($item)) {
-                self::publish_item($item);
+            if (!is_array($item)) {
+                $skipped++;
+                continue;
+            }
+            if (self::publish_item($item)) {
+                $published++;
+            } else {
+                $skipped++;
             }
         }
+
+        return ['fetched' => count($payload['items']), 'published' => $published, 'skipped' => $skipped, 'error' => null];
     }
 
-    private static function publish_item(array $item): void {
+    private static function publish_item(array $item): bool {
         if (!function_exists('post_exists')) {
             require_once ABSPATH . 'wp-admin/includes/post.php';
         }
@@ -158,7 +219,7 @@ final class Obituary_Auto_Poster {
         $source_id = sanitize_text_field($item['_id'] ?? $item['id'] ?? '');
 
         if (!$title || !$slug || self::post_exists($slug, $title, $source_id)) {
-            return;
+            return false;
         }
 
         $category_id = self::obituaries_category_id();
@@ -179,9 +240,14 @@ final class Obituary_Auto_Poster {
             ],
         ], true);
 
-        if (!is_wp_error($post_id) && !empty($item['date_of_death'])) {
+        if (is_wp_error($post_id)) {
+            return false;
+        }
+
+        if (!empty($item['date_of_death'])) {
             update_post_meta($post_id, '_oap_date_of_death', sanitize_text_field($item['date_of_death']));
         }
+        return true;
     }
 
     private static function post_exists(string $slug, string $title, string $source_id): bool {
@@ -227,6 +293,23 @@ final class Obituary_Auto_Poster {
         $description = get_post_meta(get_the_ID(), '_oap_meta_description', true);
         if ($description) {
             printf("\n<meta name=\"description\" content=\"%s\" />\n", esc_attr($description));
+        }
+    }
+
+    public static function sanitize_token(string $token): string {
+        $token = preg_replace('/[^A-Za-z0-9_\-.]/', '', $token);
+        return $token ?: self::generate_token();
+    }
+
+    private static function generate_token(): string {
+        return wp_generate_password(40, false, false);
+    }
+
+    private static function clear_legacy_cron(): void {
+        $timestamp = wp_next_scheduled(self::CRON_HOOK);
+        while ($timestamp) {
+            wp_unschedule_event($timestamp, self::CRON_HOOK);
+            $timestamp = wp_next_scheduled(self::CRON_HOOK);
         }
     }
 }

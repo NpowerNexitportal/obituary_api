@@ -1,0 +1,23 @@
+name: WordPress Publisher
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Trigger WordPress importer
+        env:
+          WORDPRESS_TRIGGER_URL: ${{ secrets.WORDPRESS_TRIGGER_URL }}
+          WORDPRESS_TRIGGER_TOKEN: ${{ secrets.WORDPRESS_TRIGGER_TOKEN }}
+        run: |
+          test -n "$WORDPRESS_TRIGGER_URL"
+          test -n "$WORDPRESS_TRIGGER_TOKEN"
+          curl --fail --show-error --silent \
+            --request POST \
+            --header "X-OAP-Token: $WORDPRESS_TRIGGER_TOKEN" \
+            "$WORDPRESS_TRIGGER_URL"

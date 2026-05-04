@@ -6,8 +6,9 @@ Production-ready starter system for collecting respectful, USA-focused obituary 
 
 - `scraper/`: independent collector run by GitHub Actions. It fetches trend keywords, scrapes lightweight HTML pages with `requests` and BeautifulSoup, extracts structured fields, rewrites content respectfully, deduplicates by hash, and writes to MongoDB.
 - `api/`: FastAPI app that only reads MongoDB and returns clean JSON responses. No scraping runs inside the API.
-- `wordpress-plugin/`: WordPress cron plugin that fetches `/api/obituaries` and publishes new posts while avoiding duplicates by source id, slug, and title.
+- `wordpress-plugin/`: WordPress plugin that fetches `/api/obituaries` and publishes new posts when called by a secure external trigger.
 - `.github/workflows/cron.yml`: runs the collector every 15 minutes.
+- `.github/workflows/wordpress-publish.yml`: optional external scheduler that triggers the WordPress publisher every 15 minutes.
 
 ## MongoDB Schema
 
@@ -144,7 +145,29 @@ OPENAI_API_KEY
 https://your-api-host.example.com/api/obituaries
 ```
 
-5. Save settings. The plugin checks every 15 minutes using WordPress cron and publishes only new posts.
+5. Save settings.
+6. Copy the **External trigger URL** and **Trigger token** from the settings page.
+
+The plugin does not use WordPress cron. This is better for shared hosts such as Namecheap where WP-Cron can be delayed by low traffic.
+
+## External WordPress Publishing Cron
+
+To trigger publishing from GitHub Actions, add these repository secrets:
+
+```text
+WORDPRESS_TRIGGER_URL=https://your-wordpress-site.com/wp-json/obituary-auto-poster/v1/run
+WORDPRESS_TRIGGER_TOKEN=the token shown in WordPress plugin settings
+```
+
+Then run **WordPress Publisher** from GitHub Actions, or wait for its 15-minute schedule.
+
+You can also test the trigger with:
+
+```bash
+curl -X POST \
+  -H "X-OAP-Token: your-token" \
+  "https://your-wordpress-site.com/wp-json/obituary-auto-poster/v1/run"
+```
 
 ## Content and Compliance Notes
 
