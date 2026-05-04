@@ -204,23 +204,27 @@ final class Obituary_Auto_Poster {
         }
 
         $published = 0;
+        $updated = 0;
         $skipped = 0;
         foreach ($payload['items'] as $item) {
             if (!is_array($item)) {
                 $skipped++;
                 continue;
             }
-            if (self::publish_item($item)) {
+            $status = self::publish_item($item);
+            if ($status === 'inserted') {
                 $published++;
+            } elseif ($status === 'updated') {
+                $updated++;
             } else {
                 $skipped++;
             }
         }
 
-        return ['fetched' => count($payload['items']), 'published' => $published, 'skipped' => $skipped, 'error' => null];
+        return ['fetched' => count($payload['items']), 'published' => $published, 'updated' => $updated, 'skipped' => $skipped, 'error' => null];
     }
 
-    private static function publish_item(array $item): bool {
+    private static function publish_item(array $item): string {
         if (!function_exists('post_exists')) {
             require_once ABSPATH . 'wp-admin/includes/post.php';
         }
@@ -232,13 +236,15 @@ final class Obituary_Auto_Poster {
         $slug = sanitize_title($item['slug'] ?? $title);
         $source_id = sanitize_text_field($item['_id'] ?? $item['id'] ?? '');
 
-        if (!$title || !$slug || self::post_exists($slug, $title, $source_id)) {
-            return false;
+        if (!$title || !$slug) {
+            return '';
         }
 
+        $existing_id = self::get_existing_post_id($slug, $title, $source_id);
         $category_id = self::obituaries_category_id();
         $content = wp_kses_post(wpautop((string) ($item['content'] ?? '')));
-        $post_id = wp_insert_post([
+        
+        $post_data = [
             'post_title' => $title,
             'post_name' => $slug,
             'post_content' => $content,
@@ -252,19 +258,28 @@ final class Obituary_Auto_Poster {
                 '_aioseo_description' => sanitize_text_field($item['meta_description'] ?? ''),
                 '_oap_meta_description' => sanitize_text_field($item['meta_description'] ?? ''),
             ],
-        ], true);
+        ];
+
+        if ($existing_id) {
+            $post_data['ID'] = $existing_id;
+            $post_id = wp_update_post($post_data, true);
+            $result = 'updated';
+        } else {
+            $post_id = wp_insert_post($post_data, true);
+            $result = 'inserted';
+        }
 
         if (is_wp_error($post_id)) {
-            return false;
+            return '';
         }
 
         if (!empty($item['date_of_death'])) {
             update_post_meta($post_id, '_oap_date_of_death', sanitize_text_field($item['date_of_death']));
         }
-        return true;
+        return $result;
     }
 
-    private static function post_exists(string $slug, string $title, string $source_id): bool {
+    private static function get_existing_post_id(string $slug, string $title, string $source_id): int {
         if ($source_id) {
             $existing = get_posts([
                 'post_type' => 'post',
@@ -275,16 +290,16 @@ final class Obituary_Auto_Poster {
                 'posts_per_page' => 1,
             ]);
             if ($existing) {
-                return true;
+                return (int) $existing[0];
             }
         }
 
         $by_slug = get_page_by_path($slug, OBJECT, 'post');
         if ($by_slug) {
-            return true;
+            return (int) $by_slug->ID;
         }
 
-        return post_exists($title) !== 0;
+        return (int) post_exists($title);
     }
 
     private static function obituaries_category_id(): int {
